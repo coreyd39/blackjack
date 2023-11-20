@@ -3,18 +3,23 @@ DESCRIPTION:
 
 This program allows the user to play Blackjack in the display window. The user is able to play a variety
 of different preset gamemodes or implement unique rules to their game. There is also an option to minimize text/print
-responses if desired with the (eventual) ability run simulations without input from the user. 
+responses if desired with the (eventual) ability run simulations without input from the user.
 
-LAST UPDATED: 10/18/23
+See README.md on GitHub for a full description of the features of the program. 
+
+LAST UPDATED: 11/20/23
 
 TO DO LIST:
 - The ability to split a pair of numbers
-- Allowing a single player to play multiple hands (having multiple hands connected to a single bankroll)
+    - Allowing a single player to play multiple hands (having multiple hands connected to a single bankroll)
 - Greater variety of preset gametypes
-- Approximating number of decks left in the shoe (for card counting)
+- Make card counting toggleable 
+- Inputtable deck penetration value (to determine when shuffles happen)
 
 CURRENT BUGS:
-- If a player surrenders and the dealer busts, the player wins 50% of their bet instead of losing it
+- If a player surrenders and the dealer busts, the player wins 50% of their bet instead of losing all of it
+- Taking insurance when dealer has blackjack displays as a loss
+- Running/True count account for the 2nd, face down dealer card
 
 '''
 
@@ -32,7 +37,7 @@ def generate_shoe(deck_num):
     shoe=deck_num*deck;
     return shoe
 
-def deal(shoe,og_shoe,players):
+def deal(shoe,og_shoe,players,discarded):
     # Deals cards to each player and dealer
     # Generates list of lists where each individual list represents a person's hand (dealer is final list)
     # Returns updated shoe
@@ -51,6 +56,7 @@ def deal(shoe,og_shoe,players):
         cards=[];
         for person in range(0,players+1):
             card=shoe[0];
+            discarded=discarded+[card];
             shoe.remove(shoe[0]);
             cards=cards+[card];
             
@@ -62,7 +68,7 @@ def deal(shoe,og_shoe,players):
         dealt=[hands[0][y],hands[1][y]];
         starting=starting+[dealt];
     
-    return [starting,shoe]
+    return [starting,shoe,discarded]
 
 def sum_hand(hand):
     total=0;
@@ -84,13 +90,14 @@ def sum_hand(hand):
         
     return total
 
-def hit(hand,shoe):
+def hit(hand,shoe,discard):
     # Check before running that the shoe is not empty
     
     hand=hand+[shoe[0]];
+    discard=discard+[shoe[0]];
     shoe.remove(shoe[0]);
     
-    return [hand]
+    return [hand,discard]
 
 def print_hands(hands,players,dealer_status):
     
@@ -121,7 +128,53 @@ def print_hands(hands,players,dealer_status):
     
     return
 
-def blackjack(gamemode='test',printed='t',players=1):
+def shoe_remaining(discarded, decks, n):
+    # Determines and returns the amount of decks left to be dealt,
+    # n variable is an integer refering to the closest (nearest) deck size the total is estimated/rounded to
+    # (i.e. n=1 is nearest full deck, n=2 is nearest half deck, so on)
+    # nearest must be an integer satisfying 1 <= n <= 52 where n = 52 is 100% accurate
+    # prints the amount of decks that have been dealt
+    
+    cards_to_be_dealt=52*decks-len(discarded);
+    decks_to_be_dealt=cards_to_be_dealt/52;
+    approximate=round(decks_to_be_dealt*n)/n;
+    
+    return approximate
+
+def current_count(discarded,running_count=0,previous_read=0):
+    # Evaluates cards currently in the discard pile (including those in play)
+    # and reads their value, updating a running card count
+    
+    # Only counts newly added cards to the discard pile
+    for x in range(previous_read,len(discarded)):
+        val=sum_hand([discarded[x]]);
+        if val == 10:
+            running_count=running_count-1;
+            
+        elif val <= 6:
+            running_count=running_count+1;
+    
+    total_read=len(discarded);
+    
+    return [running_count,total_read]
+
+def calc_true(running_count,decks_to_be_dealt):
+    # Calculates true card count
+    true_count=running_count/decks_to_be_dealt;
+    
+    return true_count
+
+def count_cards(discarded, decks, n, running_count, previous_read):
+    # Runs all card counting related functions
+    
+    decks_remaining=shoe_remaining(discarded,decks,n);
+    [running_count,previous_read]=current_count(discarded,running_count,previous_read)
+    true_count=calc_true(running_count,decks_remaining)
+    
+    return [decks_remaining, running_count, true_count, previous_read]
+    
+
+def blackjack(gamemode='test',printed='t',players=1,count='true'):
     # Initializes important global sets/values
     action_list=['hit','h','stand','stay','s', 'split','sp','surrender','sur','double down','double','d']
     
@@ -148,6 +201,13 @@ def blackjack(gamemode='test',printed='t',players=1):
         determined='false';
         bankroll_list=[];
     
+    # Initializes card counting functionalities (if desired)
+    if 'true' in count:
+        running_count=0;
+        accuracy=1;
+        previous_read=0;
+    
+    # BEGINS GAME
     # Determines number of bankrolls to consider
     while determined=='false':
         payroll_number=int(input('Number of bankrolls to account for: '))
@@ -169,6 +229,9 @@ def blackjack(gamemode='test',printed='t',players=1):
     # Saves original deck for eventual reshuffle
     og_shoe=shoe;
     
+    # Initializes discard pile for eventual reshuffle AND possible card counting
+    discard=[];
+    
     status='bet';
     while status!='n':
         
@@ -181,7 +244,7 @@ def blackjack(gamemode='test',printed='t',players=1):
     
         
         # Deals hands
-        [hands,shoe]=deal(shoe,og_shoe,players);
+        [hands,shoe,discard]=deal(shoe,og_shoe,players,discard);
         print_hands(hands,players,0)
         
         # Updates bets
@@ -193,6 +256,12 @@ def blackjack(gamemode='test',printed='t',players=1):
         insurance_list=[];
         dealer_up_card=sum_hand([hands[players][0]]);
         if dealer_up_card == 10 or dealer_up_card == 11:
+            
+            # Provides card count (if necessary)
+            if 'true' in count:
+                [decks_remaining, running_count, true_count, previous_read]=count_cards(discard, deck_num, accuracy, running_count, previous_read);
+                print('Decks Remaining: '+ str(decks_remaining) + ', Running Count: ' + str(running_count) +', True Count: ' + str(true_count)+'\n')
+            
             # make for-loop to ask each player whose bankroll matters
             for i in range(0,len(bankroll_list)):
                 ins=' ';
@@ -224,6 +293,13 @@ def blackjack(gamemode='test',printed='t',players=1):
             action='';
             while action != 's':
                 
+                ''' Bug exists here '''
+                # PROVIDE CARD COUNT HERE (if desired)
+                if 'true' in count:
+                    [decks_remaining, running_count, true_count, previous_read]=count_cards(discard, deck_num, accuracy, running_count, previous_read);
+                    print('Decks Remaining: '+ str(decks_remaining) + ', Running Count: ' + str(running_count) +', True Count: ' + str(true_count)+'\n')
+                
+                # Determines player action
                 action=input('Player ' +str(x+1)+ '\'s action: ');
                 action=action.lower();
                 
@@ -238,6 +314,7 @@ def blackjack(gamemode='test',printed='t',players=1):
                     # Check before running that the shoe is not empty
     
                     hands[x]=hands[x]+[shoe[0]];
+                    discard=discard+[shoe[0]];
                     shoe.remove(shoe[0]);
                     if sum_hand(hands[x])>21:
                         action='s';
@@ -247,6 +324,7 @@ def blackjack(gamemode='test',printed='t',players=1):
                     # Only able to on first turn of hand
                     
                     hands[x]=hands[x]+[shoe[0]];
+                    discard=discard+[shoe[0]];
                     shoe.remove(shoe[0]);
                     winnings[x]=2*winnings[x];
                     action='s';
@@ -271,10 +349,11 @@ def blackjack(gamemode='test',printed='t',players=1):
                 if action == 'stand' or action == 'stay':
                     action='s';
     
-        # Reveals second dealer card, then hits until 17 (no hit on soft 17)
+        # Reveals second dealer card, then hits until 17 (does not hit on soft 17)
         print_hands(hands,players,1)
         while sum_hand(hands[players]) < 17:           
             hands[players]=hands[players]+[shoe[0]];
+            discard=discard+[shoe[0]];
             shoe.remove(shoe[x]);
             print_hands(hands,players,1)
         
@@ -304,13 +383,6 @@ def blackjack(gamemode='test',printed='t',players=1):
         print('')
        
         status=input('Continue playing (y/n): ')
-       
     return bankroll_list
 
 bankrolls=blackjack()
-
-
-
-
-    
-    
